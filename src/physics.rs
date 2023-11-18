@@ -17,6 +17,7 @@ impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
         app
             .init_resource::<Pause>()
+            .init_resource::<ApproximationSettings>()
             .init_resource::<SubSteps>()
             .init_resource::<NBodyStats>()
             .register_type::<Velocity>()
@@ -30,6 +31,21 @@ impl Plugin for PhysicsPlugin {
 
 #[derive(Resource, Default)]
 pub struct Pause(pub bool);
+
+#[derive(Resource)]
+pub struct ApproximationSettings {
+    pub leap_frog: bool,
+    pub revo_approximation: bool,
+}
+
+impl Default for ApproximationSettings {
+    fn default() -> Self {
+        Self {
+            leap_frog: false,
+            revo_approximation: true,
+        }
+    }
+}
 
 #[derive(Resource)]
 pub struct SubSteps(pub i32);
@@ -76,7 +92,8 @@ pub fn apply_physics(
     selected_entity: Res<SelectedEntity>,
     mut orbit_offset: ResMut<OrbitOffset>,
     sub_steps: Res<SubSteps>,
-    mut nbody_stats: ResMut<NBodyStats>
+    mut nbody_stats: ResMut<NBodyStats>,
+    approximation_settings: Res<ApproximationSettings>,
 ) {
     if pause.0 {
         return;
@@ -86,7 +103,7 @@ pub fn apply_physics(
     nbody_stats.steps = 0;
     for _ in 0..sub_steps.0 {
         update_acceleration(&mut query, &mut nbody_stats.steps);
-        update_velocity_and_positions(&mut query, delta, &speed, &mut nbody_stats.steps, &selected_entity, &mut orbit_offset);
+        update_velocity_and_positions(&mut query, delta, &speed, &mut nbody_stats.steps, &selected_entity, &mut orbit_offset, approximation_settings.leap_frog);
     }
     nbody_stats.time = start.elapsed();
 }
@@ -99,7 +116,7 @@ fn update_acceleration(
     for (_, mass, mut acc, _, sim_pos, _) in query.iter_mut() {
         acc.0 = DVec3::ZERO;
         for (other_mass, ref mut other_acc, other_sim_pos) in other_bodies.iter_mut() {
-            let r_sq = (sim_pos.0 - other_sim_pos.0).length_squared() as f64;
+            let r_sq = (sim_pos.0 - other_sim_pos.0).length_squared();
             let force_direction = DVec3::from((other_sim_pos.0 - sim_pos.0).normalize()); // Calculate the direction vector  
             
             let force_magnitude = G * mass.0 * other_mass.0 / r_sq;
@@ -119,10 +136,16 @@ fn update_velocity_and_positions(
     steps: &mut i32,
     selected_entity: &Res<SelectedEntity>,
     orbit_offset: &mut ResMut<OrbitOffset>,
+    leap_frog: bool,
 ) {
     for (_, mass, mut acc, mut vel, _, _) in query.iter_mut() {
         acc.0 /= mass.0; //actually apply the force to the body
-        vel.0 += acc.0 * delta_time * speed.0 * 0.5; //apply 0.5 of the acceleration
+        if leap_frog {
+            vel.0 += acc.0 * delta_time * speed.0 * 0.5; //apply 0.5 of the acceleration
+        }
+        else {
+            vel.0 += acc.0 * delta_time * speed.0 //apply normal acceleration
+        }
         *steps += 1;
     }
     let offset = match selected_entity.entity {
@@ -132,7 +155,9 @@ fn update_velocity_and_positions(
                 let raw_translation = sim_pos.0 * M_TO_UNIT;
                 transform.translation = Vec3::ZERO; //the selected entity will always be at 0,0,0
                 *steps += 1;
-                vel.0 += acc.0 * delta_time * speed.0 * 0.5; //apply 0.5 of the acceleration a second time (the selected entity will be ignored in the loop below)
+                if leap_frog {
+                    vel.0 += acc.0 * delta_time * speed.0 * 0.5; //apply 0.5 of the acceleration a second time (the selected entity will be ignored in the loop below)
+                }
                 -raw_translation 
             } else {
                 DVec3::ZERO 
@@ -150,7 +175,9 @@ fn update_velocity_and_positions(
         sim_pos.0 += vel.0 * delta_time * speed.0;
         let pos_without_offset = sim_pos.0.as_vec3() * M_TO_UNIT as f32;
         transform.translation = pos_without_offset + offset.as_vec3(); //apply offset
-        vel.0 += acc.0 * delta_time * speed.0 * 0.5; //apply 0.5 of the acceleration a second time
+        if leap_frog {
+            vel.0 += acc.0 * delta_time * speed.0 * 0.5; //apply 0.5 of the acceleration a second time
+        }
     }
     orbit_offset.0 = offset.as_vec3();
 }

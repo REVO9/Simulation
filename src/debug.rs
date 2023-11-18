@@ -6,7 +6,7 @@ use bevy_egui::{egui::{self, InnerResponse, Response, Ui}, EguiContexts};
 
 use crate::SimState;
 use crate::body::Mass;
-use crate::physics::{NBodyStats, SubSteps};
+use crate::physics::{ApproximationSettings, NBodyStats, SubSteps};
 use crate::ui::{system_ui, UiState};
 
 
@@ -24,6 +24,7 @@ impl Plugin for DebugPlugin {
 fn debug_window(
     mut egui_ctx: EguiContexts,
     mut ui_state: ResMut<UiState>,
+    mut approximation_settings: ResMut<ApproximationSettings>,
     nbody_stats: Res<NBodyStats>,
     diagnostics: Res<DiagnosticsStore>,
     bodies: Query<&Mass>
@@ -82,5 +83,7 @@ fn debug_window(
                 ui.label(RichText::new("N-Body calculation time: ").strong());                            
                 ui.label(format!("{:?}", nbody_stats.time));
             });
+            ui.checkbox(&mut approximation_settings.leap_frog, "use leapfrog");
+            ui.checkbox(&mut approximation_settings.revo_approximation, "use leapfrog");
         });
 }
