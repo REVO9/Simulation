@@ -101,9 +101,17 @@ pub fn apply_physics(
     let delta = time.delta_seconds() as f64;
     let start = Instant::now();
     nbody_stats.steps = 0;
-    for _ in 0..sub_steps.0 {
-        update_acceleration(&mut query, &mut nbody_stats.steps);
-        update_velocity_and_positions(&mut query, delta, &speed, &mut nbody_stats.steps, &selected_entity, &mut orbit_offset, approximation_settings.leap_frog);
+    if approximation_settings.revo_approximation {
+        for _ in 0..sub_steps.0 {
+            update_acceleration(&mut query, &mut nbody_stats.steps);
+            update_velocity_and_positions(&mut query, delta, &speed, &mut nbody_stats.steps, &selected_entity, &mut orbit_offset, approximation_settings.leap_frog);
+        }
+    }
+    else {
+        for _ in 0..sub_steps.0 {
+            update_acceleration(&mut query, &mut nbody_stats.steps);
+            update_velocity_and_positions(&mut query, delta, &speed, &mut nbody_stats.steps, &selected_entity, &mut orbit_offset, approximation_settings.leap_frog);
+        }
     }
     nbody_stats.time = start.elapsed();
 }

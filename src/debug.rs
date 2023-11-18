@@ -84,6 +84,6 @@ fn debug_window(
                 ui.label(format!("{:?}", nbody_stats.time));
             });
             ui.checkbox(&mut approximation_settings.leap_frog, "use leapfrog");
-            ui.checkbox(&mut approximation_settings.revo_approximation, "use leapfrog");
+            ui.checkbox(&mut approximation_settings.revo_approximation, "use revo approximation");
         });
 }
