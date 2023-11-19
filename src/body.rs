@@ -11,6 +11,9 @@ pub struct Mass(pub f64);
 pub struct Velocity(pub DVec3);
 
 #[derive(Default, Component, Reflect, Clone)]
+pub struct PrevVelocity(pub DVec3);
+
+#[derive(Default, Component, Reflect, Clone)]
 pub struct Acceleration(pub DVec3);
 
 #[derive(Component, Reflect, Clone, Default)]
@@ -66,6 +69,9 @@ pub struct LightSource {
 pub struct SimPosition(pub DVec3);
 
 #[derive(Component, Reflect, Clone, Default)]
+pub struct PrevSimPosition(pub DVec3);
+
+#[derive(Component, Reflect, Clone, Default)]
 pub struct Diameter {
     
     pub num: f64,
@@ -96,7 +102,9 @@ pub struct BodyBundle {
     pub mass: Mass,
     pub transform: Transform,
     pub sim_position: SimPosition,
+    pub prev_sim_position: PrevSimPosition,
     pub vel: Velocity,
+    pub prev_vel: PrevVelocity,
     pub acc: Acceleration,
     pub scale: Scale,
     pub name: Name,

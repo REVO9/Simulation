@@ -1,12 +1,13 @@
 use bevy::app::{App, Plugin};
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
-use bevy::prelude::{Resource, Update, IntoSystemConfigs, in_state, Res, ResMut, Query};
+use bevy::prelude::{Update, IntoSystemConfigs, in_state, Res, ResMut, Query};
 use bevy_egui::egui::RichText;
-use bevy_egui::{egui::{self, InnerResponse, Response, Ui}, EguiContexts};
+use bevy_egui::{egui::{self}, EguiContexts};
 
 use crate::SimState;
 use crate::body::Mass;
 use crate::physics::{ApproximationSettings, NBodyStats, SubSteps};
+use crate::speed::Speed;
 use crate::ui::{system_ui, UiState};
 
 
@@ -27,6 +28,8 @@ fn debug_window(
     mut approximation_settings: ResMut<ApproximationSettings>,
     nbody_stats: Res<NBodyStats>,
     diagnostics: Res<DiagnosticsStore>,
+    mut sub_steps: ResMut<SubSteps>,
+    mut speed: ResMut<Speed>,
     bodies: Query<&Mass>
 ) {
     if !ui_state.visible {
@@ -83,6 +86,10 @@ fn debug_window(
                 ui.label(RichText::new("N-Body calculation time: ").strong());                            
                 ui.label(format!("{:?}", nbody_stats.time));
             });
+            if ui.button("debug sub steps").clicked() {
+                sub_steps.0 = 1;
+                speed.0 = 900000.0;
+            }
             ui.checkbox(&mut approximation_settings.leap_frog, "use leapfrog");
             ui.checkbox(&mut approximation_settings.revo_approximation, "use revo approximation");
         });

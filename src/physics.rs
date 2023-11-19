@@ -4,7 +4,7 @@ use bevy::app::{App, Plugin, Update};
 use bevy::math::{DVec3, Vec3};
 use bevy::prelude::{Entity, in_state, IntoSystemConfigs, Mut, Query, Res, ResMut, Resource, Time, Transform};
 
-use crate::body::{Acceleration, Mass, OrbitSettings, SimPosition, Velocity};
+use crate::body::{Acceleration, Mass, OrbitSettings, PrevSimPosition, PrevVelocity, SimPosition, Velocity};
 use crate::constants::{DEFAULT_SUB_STEPS, G, M_TO_UNIT};
 use crate::orbit_lines::OrbitOffset;
 use crate::selection::SelectedEntity;
@@ -85,7 +85,7 @@ impl SubSteps {
 }
 
 pub fn apply_physics(
-    mut query: Query<(Entity, &Mass, &mut Acceleration, &mut Velocity, &mut SimPosition, &mut Transform)>,
+    mut query: Query<(Entity, &Mass, &mut Acceleration, &mut Velocity, &mut SimPosition, &mut Transform, &mut PrevSimPosition, &mut PrevVelocity)>,
     pause: Res<Pause>,
     time: Res<Time>,
     speed: Res<Speed>,
@@ -103,8 +103,27 @@ pub fn apply_physics(
     nbody_stats.steps = 0;
     if approximation_settings.revo_approximation {
         for _ in 0..sub_steps.0 {
-            update_acceleration(&mut query, &mut nbody_stats.steps);
-            update_velocity_and_positions(&mut query, delta, &speed, &mut nbody_stats.steps, &selected_entity, &mut orbit_offset, approximation_settings.leap_frog);
+            update_acceleration(&mut query, &mut nbody_stats.steps);    // this isn't the final acceleration yet just an approximate
+            update_velocity_and_positions(                              // also not the final position
+                &mut query,
+                delta,
+                &speed,
+                &mut nbody_stats.steps,
+                &selected_entity,
+                &mut orbit_offset,
+                approximation_settings.leap_frog
+            );
+            average_acc(&mut query, &mut nbody_stats.steps);
+            reset_to_prev_point(&mut query);
+            update_velocity_and_positions(
+                &mut query,
+                delta,
+                &speed,
+                &mut nbody_stats.steps,
+                &selected_entity,
+                &mut orbit_offset,
+                approximation_settings.leap_frog
+            );
         }
     }
     else {
@@ -117,11 +136,11 @@ pub fn apply_physics(
 }
 
 fn update_acceleration(
-    query: &mut Query<(Entity, &Mass, &mut Acceleration, &mut Velocity, &mut SimPosition, &mut Transform)>,
+    query: &mut Query<(Entity, &Mass, &mut Acceleration, &mut Velocity, &mut SimPosition, &mut Transform, &mut PrevSimPosition, &mut PrevVelocity)>,
     steps: &mut i32,
 ) {
     let mut other_bodies: Vec<(&Mass, Mut<Acceleration>, Mut<SimPosition>)> = Vec::new();
-    for (_, mass, mut acc, _, sim_pos, _) in query.iter_mut() {
+    for (_, mass, mut acc, _, sim_pos, _, _, _) in query.iter_mut() {
         acc.0 = DVec3::ZERO;
         for (other_mass, ref mut other_acc, other_sim_pos) in other_bodies.iter_mut() {
             let r_sq = (sim_pos.0 - other_sim_pos.0).length_squared();
@@ -137,8 +156,8 @@ fn update_acceleration(
     }
 }
 
-fn update_velocity_and_positions(
-    query: &mut Query<(Entity, &Mass, &mut Acceleration, &mut Velocity, &mut SimPosition, &mut Transform)>,
+fn update_velocity_and_positions (
+    query: &mut Query<(Entity, &Mass, &mut Acceleration, &mut Velocity, &mut SimPosition, &mut Transform, &mut PrevSimPosition, &mut PrevVelocity)>,
     delta_time: f64,
     speed: &Res<Speed>,
     steps: &mut i32,
@@ -146,7 +165,10 @@ fn update_velocity_and_positions(
     orbit_offset: &mut ResMut<OrbitOffset>,
     leap_frog: bool,
 ) {
-    for (_, mass, mut acc, mut vel, _, _) in query.iter_mut() {
+    for (_, mass, mut acc, mut vel, sim_pos, _, mut prev_sim_pos, mut prev_velocity) in query.iter_mut() {
+        prev_sim_pos.0 = sim_pos.0.clone();
+        prev_velocity.0 = vel.0.clone();
+
         acc.0 /= mass.0; //actually apply the force to the body
         if leap_frog {
             vel.0 += acc.0 * delta_time * speed.0 * 0.5; //apply 0.5 of the acceleration
@@ -158,7 +180,7 @@ fn update_velocity_and_positions(
     }
     let offset = match selected_entity.entity {
         Some(selected) => {
-            if let Ok((_, _, acc, mut vel, mut sim_pos, mut transform)) = query.get_mut(selected) {
+            if let Ok((_, _, acc, mut vel, mut sim_pos, mut transform, ..)) = query.get_mut(selected) {
                 sim_pos.0 += vel.0 * delta_time * speed.0; //this is the same step as below, but we are doing this first for the offset
                 let raw_translation = sim_pos.0 * M_TO_UNIT;
                 transform.translation = Vec3::ZERO; //the selected entity will always be at 0,0,0
@@ -173,7 +195,7 @@ fn update_velocity_and_positions(
         }
         None => DVec3::ZERO,
     };
-    for (entity, _, acc, mut vel, mut sim_pos, mut transform) in query.iter_mut() {
+    for (entity, _, acc, mut vel, mut sim_pos, mut transform, ..) in query.iter_mut() {
         if let Some(s_entity) = selected_entity.entity {
             if s_entity == entity {
                 continue;
@@ -188,4 +210,35 @@ fn update_velocity_and_positions(
         }
     }
     orbit_offset.0 = offset.as_vec3();
+}
+
+fn average_acc (
+    query: &mut Query<(Entity, &Mass, &mut Acceleration, &mut Velocity, &mut SimPosition, &mut Transform, &mut PrevSimPosition, &mut PrevVelocity)>,
+    steps: &mut i32,
+) {
+    let mut other_bodies: Vec<(&Mass, Mut<Acceleration>, Mut<SimPosition>)> = Vec::new();
+    for (_, mass, mut acc, _, sim_pos, ..) in query.iter_mut() {
+        //acc.0 = DVec3::ZERO; //don't reset the acceleration
+        for (other_mass, ref mut other_acc, other_sim_pos) in other_bodies.iter_mut() {
+            let r_sq = (sim_pos.0 - other_sim_pos.0).length_squared();
+            let force_direction = DVec3::from((other_sim_pos.0 - sim_pos.0).normalize()); // Calculate the direction vector
+
+            let force_magnitude = G * mass.0 * other_mass.0 / r_sq;
+            let force = force_direction * force_magnitude;
+            acc.0 += force;
+            other_acc.0 -= force;
+            acc.0 *= 0.5;        //half the acceleration to get an average
+            *steps += 1;
+        }
+        other_bodies.push((mass, acc, sim_pos));
+    }
+}
+
+fn reset_to_prev_point (
+    query: &mut Query<(Entity, &Mass, &mut Acceleration, &mut Velocity, &mut SimPosition, &mut Transform, &mut PrevSimPosition, &mut PrevVelocity)>,
+) {
+    for (_, _, _, mut velocity, mut sim_position, _, prev_sim_position, prev_velocity) in query.iter_mut() {
+        velocity.0 = prev_velocity.0;
+        sim_position.0 = prev_sim_position.0;
+    }
 }
